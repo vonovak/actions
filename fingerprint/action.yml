@@ -6,7 +6,7 @@ branding:
   icon: smartphone
   color: gray-dark
 runs:
-  using: node20
+  using: node24
   main: ../build/fingerprint.js
   post: ../build/fingerprint-post.js
   post-if: success()

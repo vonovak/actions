@@ -22,12 +22,12 @@ runs:
         bun-version: ${{ inputs.bun-version }}
 
     - name: 🏗 Setup Node
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: ${{ inputs.node-version }}
 
     - name: 🏗 Setup pnpm
       if: ${{ inputs.pnpm-version }}
-      uses: pnpm/action-setup@v4
+      uses: pnpm/action-setup@v6
       with:
         version: ${{ inputs.pnpm-version }}

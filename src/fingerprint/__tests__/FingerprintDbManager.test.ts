@@ -502,7 +502,7 @@ describe(FingerprintDbManager, () => {
       if (migrationDbManager) {
         await migrationDbManager.closeAsync();
       }
-      await fs.promises.unlink(tempDbPath);
+      await fs.promises.rm(tempDbPath, { force: true });
     }
   });
 });
