@@ -91,6 +91,7 @@ Here is a summary of all the input options you can use.
 | **saving-db-branch**          | ❌       | The branch for saving the fingerprint database                                                         |
 | **retention-days**            | ❌       | Duration after which artifact will expire in days                                                      |
 | **compression-level**         | ❌       | The level of compression for Zlib (0-9). Default is `6`                                                |
+| **include-hidden-files**      | ❌       | Whether to include hidden files in the artifact. Default is `false`                                    |
 
 ### Available outputs
 

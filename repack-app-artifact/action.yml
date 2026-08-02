@@ -54,6 +54,7 @@ runs:
         path: ${{ steps.repack.outputs.output-path || inputs.build-output }}
         retention-days: ${{ inputs.retention-days }}
         compression-level: ${{ inputs.compression-level }}
+        include-hidden-files: ${{ inputs.include-hidden-files }}
 
     - name: Update fingerprint database
       id: update-fingerprint
@@ -135,6 +136,10 @@ inputs:
     description: The level of compression for Zlib (0-9)
     required: false
     default: '6'
+  include-hidden-files:
+    description: Whether to include hidden files in the artifact
+    required: false
+    default: 'false'
   #
   # [END] Shared inputs with actions/download-artifact and actions/upload-artifact
 
