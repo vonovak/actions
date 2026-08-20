@@ -19,6 +19,14 @@ A GitHub Action that repackages apps from fingerprint-compatible builds with new
 
 A composite GitHub Action that simplifies the fingerprint-based repackaging workflow by combining artifact querying, downloading, repacking, building, uploading, and database updates into a single step.
 
+### [`expo/actions/build-expo-app`](./build-expo-app#readme)
+
+A composite GitHub Action for smoke-testing library compatibility with different Expo SDK versions. Sets up an Expo app, runs prebuild, exports JS bundles, and optionally builds native iOS and Android apps.
+
+### [`expo/actions/resolve-expo-versions`](./resolve-expo-versions#readme)
+
+A GitHub Action that resolves Expo SDK version specifiers such as `latest` and `latest-1` into concrete versions, for use with `fromJSON()` in a matrix strategy.
+
 ## Contributing
 
 All GitHub Actions in this repository are open-source and contributions are welcome.

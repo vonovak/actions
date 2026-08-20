@@ -1,0 +1,160 @@
+---
+name: Expo GitHub Action - Build Expo App
+author: Expo
+description: Setup Expo app, run prebuild, export, and optionally build native apps for compatibility testing
+branding:
+  icon: smartphone
+  color: gray-dark
+runs:
+  using: composite
+  steps:
+    - name: Validate expo-version input
+      env:
+        EXPO_VERSION: ${{ inputs.expo-version }}
+      run: |
+        if [ -z "$EXPO_VERSION" ]; then
+          echo "expo-version input is required" >&2
+          exit 1
+        fi
+      shell: bash
+
+    - name: Resolve Expo version
+      id: resolve-version
+      uses: $/resolve-expo-versions
+      with:
+        expo-version: ${{ inputs.expo-version }}
+        single: 'true'
+
+    - name: Setup Expo app
+      id: setup-app
+      env:
+        APP_PATH: ${{ inputs.app-path }}
+        APP_TEMPLATE: ${{ inputs.app-template }}
+        TEMPLATE_TAG: ${{ steps.resolve-version.outputs.template-tag }}
+        RESOLVED_VERSION: ${{ steps.resolve-version.outputs.resolved-version }}
+      run: |
+        echo "::group::Setup Expo app"
+        echo "app-name=$(basename "$APP_PATH")" >> "$GITHUB_OUTPUT"
+        if [ -d "$APP_PATH" ]; then
+          echo "Using existing app at $APP_PATH"
+          cd "$APP_PATH"
+          npx expo install "expo@$RESOLVED_VERSION" --fix
+        else
+          echo "Creating new Expo app at $APP_PATH"
+          npx create-expo-app "$APP_PATH" --yes --template "$APP_TEMPLATE@$TEMPLATE_TAG"
+          cd "$APP_PATH"
+          npx expo install "expo@$RESOLVED_VERSION" --fix
+          npx expo customize metro.config.js
+        fi
+        echo "::endgroup::"
+      shell: bash
+
+    - name: Run setup hook
+      if: inputs.setup-hook != ''
+      run: |
+        echo "::group::Run setup hook"
+        ${{ inputs.setup-hook }}
+        echo "::endgroup::"
+      shell: bash
+      working-directory: ${{ inputs.app-path }}
+
+    - name: Run expo prebuild
+      if: contains(inputs.build, 'prebuild')
+      run: |
+        echo "::group::Run expo prebuild"
+        npx expo prebuild
+        echo "::endgroup::"
+      shell: bash
+      working-directory: ${{ inputs.app-path }}
+      env:
+        RCT_USE_PREBUILT_RNCORE: 1
+        RCT_USE_RN_DEP: 1
+        EXPO_DEBUG: 0
+
+    - name: Bundle JS code
+      if: contains(inputs.build, 'export')
+      run: |
+        echo "::group::Bundle JS code"
+        npx expo export
+        echo "::endgroup::"
+      shell: bash
+      working-directory: ${{ inputs.app-path }}
+
+    - name: Build iOS
+      if: contains(inputs.build, 'ios') && runner.os == 'macOS'
+      env:
+        IOS_SCHEME: ${{ inputs.ios-scheme }}
+      run: |
+        echo "::group::Build iOS"
+        SCHEME="$IOS_SCHEME"
+        if [ -z "$SCHEME" ]; then
+          SCHEME=$(basename "$(ls -d ios/*.xcworkspace | head -n1)" .xcworkspace)
+        fi
+        echo "Building iOS app (scheme: $SCHEME)"
+        xcodebuild \
+          -workspace "ios/${SCHEME}.xcworkspace" \
+          -scheme "$SCHEME" \
+          -configuration Release \
+          -sdk iphonesimulator \
+          -derivedDataPath ios/build
+        echo "::endgroup::"
+      shell: bash
+      working-directory: ${{ inputs.app-path }}
+
+    - name: Build Android
+      if: contains(inputs.build, 'android') && runner.os != 'macOS'
+      env:
+        ANDROID_GRADLE_TASK: ${{ inputs.android-gradle-task }}
+      run: |
+        echo "::group::Build Android"
+        echo "Building Android app (task: $ANDROID_GRADLE_TASK)"
+        cd android
+        ./gradlew "$ANDROID_GRADLE_TASK"
+        echo "::endgroup::"
+      shell: bash
+      working-directory: ${{ inputs.app-path }}
+
+    - name: Upload app
+      if: always() && inputs.upload-app == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ format('expo-app-{0}-{1}', runner.os, steps.setup-app.outputs.app-name) }}
+        path: |
+          ${{ inputs.app-path }}
+          !${{ inputs.app-path }}/node_modules
+          !${{ inputs.app-path }}/ios/build
+          !${{ inputs.app-path }}/ios/Pods
+          !${{ inputs.app-path }}/android/.gradle
+          !${{ inputs.app-path }}/android/app/build/intermediates
+        retention-days: 7
+
+inputs:
+  expo-version:
+    description: 'Expo SDK version: numeric (52), latest, latest-N (latest-1, latest-2), next, or canary'
+    required: true
+  app-path:
+    description: Path where app exists or will be created (also used as project name for create-expo-app)
+    default: expo-test-app
+  app-template:
+    description: Template for new apps
+    default: expo-template-blank-typescript
+  setup-hook:
+    description: Script to run after app is created/updated (install package, modify App.tsx, app.json, etc)
+    required: false
+  build:
+    description: Comma-separated list of steps to run (prebuild, export, ios, android)
+    default: prebuild,export,ios,android
+  ios-scheme:
+    description: iOS scheme name (auto-detected from the generated Xcode workspace if not provided)
+    required: false
+  android-gradle-task:
+    description: Gradle task for Android build
+    default: assembleRelease
+  upload-app:
+    description: Upload the app directory as an artifact for debugging (runs even on failure)
+    default: 'false'
+
+outputs:
+  resolved-expo-version:
+    description: The resolved Expo SDK version (numeric major, 'next', or 'canary')
+    value: ${{ steps.resolve-version.outputs.resolved-version }}

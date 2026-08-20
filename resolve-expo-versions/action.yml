@@ -1,0 +1,26 @@
+---
+name: Expo GitHub Action - Resolve Expo Versions
+author: Expo
+description: Resolves Expo SDK version specifiers (latest, latest-N, next, canary, numeric) to concrete versions for matrix builds
+branding:
+  icon: list
+  color: gray-dark
+runs:
+  using: node20
+  main: ../build/resolve-expo-versions.js
+
+inputs:
+  expo-version:
+    description: 'Comma-separated Expo SDK version specifiers: numeric (52), latest, latest-N (latest-1, latest-2), next, or canary'
+    default: latest
+  single:
+    description: Require the input to resolve to exactly one version, and set the `resolved-version` and `template-tag` outputs. Default is `false`
+    default: 'false'
+
+outputs:
+  versions:
+    description: JSON array of resolved Expo SDK versions for use with fromJSON() in a matrix strategy
+  resolved-version:
+    description: The single resolved Expo SDK version. Only set when `single` is `true`
+  template-tag:
+    description: The npm dist-tag to request from the app template package. Only set when `single` is `true`

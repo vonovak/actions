@@ -42,6 +42,8 @@ async function build(input: ReturnType<typeof resolveInput>) {
       external: ['@expo/fingerprint', 'module', 'sqlite3'],
     });
 
+    normalizeBundledPaths(result.outputs.map((file) => file.path));
+
     console.log(
       `✅ Build succeeded in ${Date.now() - startedAt}ms`,
       styleText(
@@ -58,6 +60,26 @@ async function build(input: ReturnType<typeof resolveInput>) {
       console.error(error);
     } else {
       throw error;
+    }
+  }
+}
+
+/**
+ * Rewrite the absolute repository path out of the bundles.
+ *
+ * Bun replaces `__dirname` in bundled CJS dependencies with the absolute directory it
+ * built from, which would make the committed output differ on every machine. `build/` is
+ * committed, so the output has to be reproducible.
+ */
+function normalizeBundledPaths(filePaths: string[]) {
+  const repoPrefix = `${path.resolve(__dirname, '../..')}/`;
+
+  for (const filePath of filePaths) {
+    const source = fs.readFileSync(filePath, 'utf8');
+    const normalized = source.replaceAll(repoPrefix, '');
+
+    if (normalized !== source) {
+      fs.writeFileSync(filePath, normalized);
     }
   }
 }
