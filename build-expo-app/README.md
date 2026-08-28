@@ -45,7 +45,7 @@ This action automatically handles:
 - Registering your config plugins in the generated `app.json`
 - Running `expo prebuild` to generate the native projects
 - Bundling the JS with `expo export`
-- Building the native app with `xcodebuild` on macOS runners, or Gradle elsewhere
+- Building the native app with `xcodebuild` or Gradle
 
 Version resolution is delegated to [`resolve-expo-versions`](../resolve-expo-versions/README.md).
 
@@ -80,7 +80,7 @@ Here is a summary of all the input options you can use.
 | **copy-files**          | ❌       | Path to a file or directory copied into the app root, overwriting existing files                                             |
 | **config-plugins**      | ❌       | Config plugins to merge into `expo.plugins` in `app.json`, as a JSON array. See [below](#registering-config-plugins)          |
 | **setup-hook**          | ❌       | Script to run after the app is created or updated, to install your package or edit `App.tsx` and `app.json`                   |
-| **build**               | ❌       | Comma-separated list of steps to run (`prebuild`, `export`, `ios`, `android`). Default is `prebuild,export,ios,android`       |
+| **build**               | ❌       | Comma-separated list of steps to run (`prebuild`, `export`, `ios`, `android`). Default is `prebuild,export,ios,android`. See [below](#choosing-runners-for-native-builds) |
 | **ios-scheme**          | ❌       | iOS scheme name. Auto-detected from the generated Xcode workspace if not provided                                            |
 | **android-gradle-task** | ❌       | Gradle task for the Android build. Default is `assembleRelease`                                                              |
 | **upload-app**          | ❌       | Upload the app directory as an artifact for debugging, which runs even on failure. Default is `false`                          |
@@ -165,6 +165,37 @@ Or a `[name, options]` pair when the plugin takes parameters:
 An entry replaces an existing plugin with the same name, so you can override what the template already registers. This step runs after `copy-files` and before `setup-hook`.
 
 Only a static `app.json` is supported. For `app.config.js` or `app.config.ts`, edit the plugins list from `setup-hook`.
+
+## Choosing runners for native builds
+
+The action runs whatever `build` asks for. Picking runners is yours to decide, so nothing is skipped behind your back.
+
+`ios` requires a macOS runner, because it needs Xcode. Asking for it anywhere else fails immediately, before the app is even created:
+
+```
+Error: build includes 'ios' but this runner is Linux. iOS builds need a macOS runner.
+```
+
+`android` runs anywhere, macOS included.
+
+To cover both platforms, add the runner to your matrix and let the action split the work:
+
+```yaml
+strategy:
+  matrix:
+    os: [ubuntu-latest, macos-latest]
+    expo-version: [53, 54]
+runs-on: ${{ matrix.os }}
+steps:
+  - uses: expo/actions/build-expo-app@main
+    with:
+      expo-version: ${{ matrix.expo-version }}
+      build: ${{ runner.os == 'macOS' && 'prebuild,export,ios' || 'prebuild,export,android' }}
+```
+
+Native builds are slow, and macOS minutes cost more. A common split is `prebuild,export` on pull requests and the full `build` on a schedule.
+
+`android` needs a JDK. Add [`actions/setup-java`](https://github.com/actions/setup-java) before this action rather than relying on whatever the runner image ships.
 
 ## Example workflows
 

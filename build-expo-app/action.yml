@@ -8,14 +8,29 @@ branding:
 runs:
   using: composite
   steps:
-    - name: Validate expo-version input
+    - name: Validate inputs
       env:
         EXPO_VERSION: ${{ inputs.expo-version }}
+        BUILD: ${{ inputs.build }}
       run: |
         if [ -z "$EXPO_VERSION" ]; then
-          echo "expo-version input is required" >&2
+          echo "::error::expo-version input is required"
           exit 1
         fi
+
+        # iOS needs Xcode, so it cannot run anywhere but macOS. Fail here rather
+        # than skipping the build later and reporting success for work that never
+        # happened. Checked up front so the run ends in seconds, not after a
+        # prebuild.
+        # Substring match, the same test the Build iOS step's `if:` uses.
+        case "$BUILD" in
+          *ios*)
+            if [ "$RUNNER_OS" != "macOS" ]; then
+              echo "::error::build includes 'ios' but this runner is $RUNNER_OS. iOS builds need a macOS runner."
+              exit 1
+            fi
+            ;;
+        esac
       shell: bash
 
     - name: Resolve Expo version
@@ -195,7 +210,7 @@ runs:
       working-directory: ${{ inputs.app-path }}
 
     - name: Build iOS
-      if: contains(inputs.build, 'ios') && runner.os == 'macOS'
+      if: contains(inputs.build, 'ios')
       env:
         IOS_SCHEME: ${{ inputs.ios-scheme }}
       run: |
@@ -216,7 +231,7 @@ runs:
       working-directory: ${{ inputs.app-path }}
 
     - name: Build Android
-      if: contains(inputs.build, 'android') && runner.os != 'macOS'
+      if: contains(inputs.build, 'android')
       env:
         ANDROID_GRADLE_TASK: ${{ inputs.android-gradle-task }}
       run: |
