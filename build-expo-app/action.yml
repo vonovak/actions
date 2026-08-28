@@ -20,7 +20,7 @@ runs:
 
     - name: Resolve Expo version
       id: resolve-version
-      uses: vonovak/actions/resolve-expo-versions@build-expo-app
+      uses: $/resolve-expo-versions
       with:
         expo-version: ${{ inputs.expo-version }}
         single: 'true'
@@ -48,6 +48,65 @@ runs:
         fi
         echo "::endgroup::"
       shell: bash
+
+    - name: Install local package
+      if: inputs.local-package != ''
+      env:
+        LOCAL_PACKAGE: ${{ inputs.local-package }}
+      run: |
+        echo "::group::Install local package"
+        case "$LOCAL_PACKAGE" in
+          /*) SOURCE="$LOCAL_PACKAGE" ;;
+          *) SOURCE="$GITHUB_WORKSPACE/$LOCAL_PACKAGE" ;;
+        esac
+
+        if [ -d "$SOURCE" ]; then
+          echo "Packing $SOURCE"
+          PACK_DIR=$(mktemp -d)
+          # npm pack honours the `files` field and runs the `prepare` script.
+          # Output goes to stderr so lifecycle noise cannot be mistaken for the path.
+          (cd "$SOURCE" && npm pack --pack-destination "$PACK_DIR" >&2)
+          TARBALL=$(find "$PACK_DIR" -name '*.tgz' -maxdepth 1 | head -n1)
+          if [ -z "$TARBALL" ]; then
+            echo "npm pack produced no tarball in $SOURCE" >&2
+            exit 1
+          fi
+        elif [ -f "$SOURCE" ]; then
+          TARBALL="$SOURCE"
+        else
+          echo "local-package not found: $SOURCE" >&2
+          exit 1
+        fi
+
+        echo "Installing $TARBALL"
+        npm install "$TARBALL"
+        echo "EXPO_LOCAL_PACKAGE_TARBALL=$TARBALL" >> "$GITHUB_ENV"
+        echo "::endgroup::"
+      shell: bash
+      working-directory: ${{ inputs.app-path }}
+
+    - name: Copy test files into the app
+      if: inputs.copy-files != ''
+      env:
+        COPY_FILES: ${{ inputs.copy-files }}
+      run: |
+        echo "::group::Copy test files into the app"
+        case "$COPY_FILES" in
+          /*) SOURCE="$COPY_FILES" ;;
+          *) SOURCE="$GITHUB_WORKSPACE/$COPY_FILES" ;;
+        esac
+
+        if [ -d "$SOURCE" ]; then
+          cp -Rv "$SOURCE/." .
+        elif [ -f "$SOURCE" ]; then
+          cp -v "$SOURCE" .
+        else
+          echo "copy-files not found: $SOURCE" >&2
+          exit 1
+        fi
+        echo "::endgroup::"
+      shell: bash
+      working-directory: ${{ inputs.app-path }}
 
     - name: Run setup hook
       if: inputs.setup-hook != ''
@@ -138,6 +197,21 @@ inputs:
   app-template:
     description: Template for new apps
     default: expo-template-blank-typescript
+  local-package:
+    description: >-
+      Path to the library under test, relative to the workspace root or absolute.
+      A directory is packed with `npm pack` first; a `.tgz` file is installed as is.
+      Dependencies must already be installed in a directory, so `npm pack` can run
+      the `prepare` script. Runs before `setup-hook`, which receives the resolved
+      tarball path in `$EXPO_LOCAL_PACKAGE_TARBALL`.
+    required: false
+  copy-files:
+    description: >-
+      Path to a file or directory copied into the app root, relative to the
+      workspace root or absolute. Existing files are overwritten. Use it to drop
+      in an `App.tsx` that exercises the library, so `expo export` fails when the
+      JS entry point breaks. Runs after `local-package` and before `setup-hook`.
+    required: false
   setup-hook:
     description: Script to run after app is created/updated (install package, modify App.tsx, app.json, etc)
     required: false
