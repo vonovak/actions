@@ -20,7 +20,7 @@ runs:
 
     - name: Resolve Expo version
       id: resolve-version
-      uses: $/resolve-expo-versions
+      uses: vonovak/actions/resolve-expo-versions@build-expo-app
       with:
         expo-version: ${{ inputs.expo-version }}
         single: 'true'
