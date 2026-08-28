@@ -41,6 +41,9 @@ jobs:
         with:
           expo-version: latest
           build: prebuild,export
+          # `config-plugins` only registers the plugin, so the package has to be
+          # installed too. `setup-hook` runs after it and before prebuild.
+          setup-hook: npx expo install expo-font
           config-plugins: '["expo-font"]'
 
       - name: Check the action resolved a concrete SDK version

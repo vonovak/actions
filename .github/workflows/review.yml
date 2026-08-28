@@ -36,8 +36,29 @@ jobs:
 
       - name: ✅ Verify committed build output is current
         run: |
-          if [ -n "$(git status --porcelain -- build)" ]; then
-            echo "::error::build/ is out of date. Run 'bun run build' and commit the result."
-            git status --porcelain -- build
-            exit 1
+          if [ -z "$(git status --porcelain -- build)" ]; then
+            exit 0
           fi
+
+          echo "::error::build/ is out of date. Run 'bun run build' and commit the result."
+          git status --porcelain -- build
+
+          # The bundles are one long line, so a plain diff is unreadable. Print a
+          # window around the first differing character of each file instead.
+          for file in $(git diff --name-only -- build); do
+            git show "HEAD:$file" > "$RUNNER_TEMP/committed.js"
+            node -e '
+              const fs = require("node:fs");
+              const [committed, rebuilt] = process.argv.slice(1);
+              const a = fs.readFileSync(committed, "utf8");
+              const b = fs.readFileSync(rebuilt, "utf8");
+              let at = 0;
+              while (at < a.length && at < b.length && a[at] === b[at]) at++;
+              const from = Math.max(0, at - 120);
+              console.log(`\n${rebuilt}: first differs at offset ${at} (${a.length} vs ${b.length} chars)`);
+              console.log(`committed: ...${a.slice(from, at + 200)}`);
+              console.log(`rebuilt:   ...${b.slice(from, at + 200)}`);
+            ' "$RUNNER_TEMP/committed.js" "$file"
+          done
+
+          exit 1
