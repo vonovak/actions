@@ -73,10 +73,13 @@ async function build(input: ReturnType<typeof resolveInput>) {
  */
 function normalizeBundledPaths(filePaths: string[]) {
   const repoPrefix = `${path.resolve(__dirname, '../..')}/`;
+  // A sentinel rather than '', so a bundled `__dirname` stays an absolute path that
+  // fails loudly instead of silently resolving against the runner's cwd.
+  const replacement = '/__bundled__/';
 
   for (const filePath of filePaths) {
     const source = fs.readFileSync(filePath, 'utf8');
-    const normalized = source.replaceAll(repoPrefix, '');
+    const normalized = source.replaceAll(repoPrefix, replacement);
 
     if (normalized !== source) {
       fs.writeFileSync(filePath, normalized);

@@ -8,9 +8,11 @@ export type ResolvedVersion = string;
  *
  * Supported specifiers:
  * - `next`, `canary` — passed through as-is (dist-tags)
- * - `52` — numeric, passed through as-is
+ * - `52` — numeric, normalised to its major
  * - `latest` — resolved to current stable SDK major version
  * - `latest-N` — resolved to (latest major - N)
+ *
+ * The result preserves input order and contains no duplicates.
  */
 export async function resolveExpoVersions(
   input: string,
@@ -29,11 +31,18 @@ export async function resolveExpoVersions(
   let latestVersion: Promise<number> | null = null;
   const getLatest = () => (latestVersion ??= fetchLatestVersion());
 
-  return Promise.all(specs.map((spec) => resolveSpec(spec, getLatest)));
+  // Deduplicate, because `latest,57` collapses to the same major once resolved. Duplicates
+  // would produce identical matrix jobs and collide on artifact names.
+  const resolved = await Promise.all(specs.map((spec) => resolveSpec(spec, getLatest)));
+
+  return [...new Set(resolved)];
 }
 
 const LATEST_OFFSET_RE = /^latest-(\d+)$/;
 const NUMERIC_RE = /^\d+$/;
+
+/** Oldest SDK these actions still work with. Applies to every specifier that resolves to a major. */
+const MIN_SDK_VERSION = 45;
 
 /** Dist-tags that map to no fixed SDK major. Both `expo` and the app templates publish these. */
 const DIST_TAGS = new Set(['next', 'canary']);
@@ -47,7 +56,7 @@ async function resolveSpec(
   }
 
   if (NUMERIC_RE.test(spec)) {
-    return spec;
+    return checkNotTooOld(parseInt(spec, 10), spec);
   }
 
   if (spec === 'latest') {
@@ -57,18 +66,23 @@ async function resolveSpec(
   const match = spec.match(LATEST_OFFSET_RE);
   if (match) {
     const offset = parseInt(match[1], 10);
-    const resolved = (await getLatest()) - offset;
-    if (resolved < 45) {
-      throw new Error(
-        `Resolved version ${resolved} (from ${spec}) is too old. Minimum supported SDK is 45.`
-      );
-    }
-    return String(resolved);
+    return checkNotTooOld((await getLatest()) - offset, spec);
   }
 
   throw new Error(
     `Invalid expo-version specifier: '${spec}'. Expected: next, canary, latest, latest-N, or a numeric SDK version (e.g. 52)`
   );
+}
+
+/** Normalise a resolved major to a string, rejecting SDKs these actions cannot set up. */
+function checkNotTooOld(version: number, spec: string): ResolvedVersion {
+  if (version < MIN_SDK_VERSION) {
+    throw new Error(
+      `Resolved version ${version} (from '${spec}') is too old. Minimum supported SDK is ${MIN_SDK_VERSION}.`
+    );
+  }
+
+  return String(version);
 }
 
 /**

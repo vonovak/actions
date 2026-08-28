@@ -41,12 +41,16 @@ It accepts these specifiers, comma-separated:
 
 | specifier  | resolves to                                            |
 | ---------- | ------------------------------------------------------ |
-| `52`       | itself, unchanged                                      |
+| `52`       | its major, so `052` becomes `52`                       |
 | `latest`   | the current stable SDK major, from the npm `expo` tag   |
 | `latest-N` | the current stable SDK major minus `N`                 |
 | `next`, `canary` | itself, unchanged (dist-tag)                     |
 
-The npm registry is queried at most once per run, and not at all when every specifier is already concrete. Resolving below SDK 45 is an error.
+The npm registry is queried at most once per run, and not at all when every specifier is already concrete.
+
+Resolving below SDK 45 is an error, whichever specifier gets you there — `44` is rejected the same way `latest-13` is.
+
+The output preserves input order and holds no duplicates. `latest,57` collapses to a single entry once 57 is current, so the matrix does not run the same job twice or collide on artifact names.
 
 Pair it with [`build-expo-app`](../build-expo-app/README.md), which uses this action internally to resolve its own `expo-version` input.
 
@@ -120,7 +124,7 @@ jobs:
         expo-version: ${{ fromJSON(needs.versions.outputs.versions) }}
     steps:
       - name: 🏗 Setup repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 📦 Install dependencies
         run: yarn install

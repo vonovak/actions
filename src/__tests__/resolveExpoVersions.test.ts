@@ -15,6 +15,10 @@ describe(resolveExpoVersions, () => {
     ['latest,latest-1,next', ['53', '52', 'next']],
     [' latest , 52 , next ', ['53', '52', 'next']],
     ['55,latest,latest-2', ['55', '53', '51']],
+    // `045` normalises to its major, and duplicates collapse in input order
+    ['045', ['45']],
+    ['latest,53,latest-1', ['53', '52']],
+    ['next,next', ['next']],
   ])('%s -> %j', async (input, expected) => {
     expect(await resolveExpoVersions(input, mockLatest)).toEqual(expected);
   });
@@ -23,6 +27,8 @@ describe(resolveExpoVersions, () => {
     ['', 'empty'],
     ['foo', 'Invalid expo-version specifier'],
     ['latest-20', 'too old'],
+    ['44', 'too old'],
+    ['0', 'too old'],
   ])('%s throws %s', async (input, error) => {
     await expect(resolveExpoVersions(input, mockLatest)).rejects.toThrow(error);
   });

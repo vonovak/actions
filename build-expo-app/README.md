@@ -43,7 +43,7 @@ This action automatically handles:
 - Packing the library under test and installing it into the app
 - Copying your own test files, such as an `App.tsx` that imports the library
 - Registering your config plugins in the generated `app.json`
-- Running `expo prebuild` to generate the native projects
+- Running `expo prebuild` to generate the native projects, against prebuilt React Native core (`RCT_USE_PREBUILT_RNCORE`) to keep `pod install` short
 - Bundling the JS with `expo export`
 - Building the native app with `xcodebuild` or Gradle
 
@@ -80,12 +80,12 @@ Here is a summary of all the input options you can use.
 | **copy-files**          | ❌       | Path to a file or directory copied into the app root, overwriting existing files                                             |
 | **config-plugins**      | ❌       | Config plugins to merge into `expo.plugins` in `app.json`, as a JSON array. See [below](#registering-config-plugins)          |
 | **setup-hook**          | ❌       | Script to run after the app is created or updated, to install your package or edit `App.tsx` and `app.json`                   |
-| **build**               | ❌       | Comma-separated list of steps to run (`prebuild`, `export`, `ios`, `android`). Default is `prebuild,export,ios,android`. See [below](#choosing-runners-for-native-builds) |
+| **build**               | ❌       | Comma-separated list of steps to run (`prebuild`, `export`, `ios`, `android`). Default is `auto`. See [below](#choosing-runners-for-native-builds) |
 | **ios-scheme**          | ❌       | iOS scheme name. Auto-detected from the generated Xcode workspace if not provided                                            |
 | **android-gradle-task** | ❌       | Gradle task for the Android build. Default is `assembleRelease`                                                              |
 | **upload-app**          | ❌       | Upload the app directory as an artifact for debugging, which runs even on failure. Default is `false`                          |
 
-The `ios` step runs only on macOS runners; `android` runs on the others. A `build` list with both is fine — each runner picks its step.
+An unrecognised `build` step is an error, not a skipped step, so a typo cannot produce a green job that built nothing.
 
 ### Available outputs
 
@@ -102,7 +102,7 @@ Set `local-package` to the library you want to check. The action installs it int
 A directory is packed with `npm pack` first:
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v6
 
 - uses: expo/actions/build-expo-app@main
   with:
@@ -112,10 +112,12 @@ A directory is packed with `npm pack` first:
 
 `npm pack` honours the `files` field in `package.json` and runs the `prepare` script, so install the library's dependencies first. Note that `yarn pack` behaves differently: it also applies `.gitignore`, which can drop built output that `files` includes.
 
+The tarball is installed with the app's own package manager, chosen from the lockfile in `app-path` — `yarn.lock`, `pnpm-lock.yaml` and `bun.lock` are recognised, and npm is the fallback. That matters when `app-path` points at an existing app in your repo rather than one this action created.
+
 If you already pack the library in an earlier job, pass the `.tgz` instead:
 
 ```yaml
-- uses: actions/download-artifact@v4
+- uses: actions/download-artifact@v5
   with:
     name: library-tarball
     path: dist
@@ -168,17 +170,16 @@ Only a static `app.json` is supported. For `app.config.js` or `app.config.ts`, e
 
 ## Choosing runners for native builds
 
-The action runs whatever `build` asks for. Picking runners is yours to decide, so nothing is skipped behind your back.
+`ios` requires a macOS runner, because it needs Xcode. `android` runs anywhere, macOS included.
 
-`ios` requires a macOS runner, because it needs Xcode. Asking for it anywhere else fails immediately, before the app is even created:
+The default, `build: auto`, picks the native platform the current runner can build:
 
-```
-Error: build includes 'ios' but this runner is Linux. iOS builds need a macOS runner.
-```
+| runner   | `auto` expands to           |
+| -------- | --------------------------- |
+| macOS    | `prebuild,export,ios`       |
+| anything else | `prebuild,export,android` |
 
-`android` runs anywhere, macOS included.
-
-To cover both platforms, add the runner to your matrix and let the action split the work:
+So covering both platforms is just a runner matrix:
 
 ```yaml
 strategy:
@@ -190,10 +191,25 @@ steps:
   - uses: expo/actions/build-expo-app@main
     with:
       expo-version: ${{ matrix.expo-version }}
-      build: ${{ runner.os == 'macOS' && 'prebuild,export,ios' || 'prebuild,export,android' }}
 ```
 
-Native builds are slow, and macOS minutes cost more. A common split is `prebuild,export` on pull requests and the full `build` on a schedule.
+Nothing is skipped behind your back. Naming `ios` explicitly on a non-macOS runner fails immediately, before the app is even created:
+
+```
+Error: build includes 'ios' but this runner is Linux. iOS builds need a macOS runner.
+```
+
+So does a step the action does not recognise, which otherwise produces a green job that built nothing:
+
+```
+Error: Unknown build step 'exort'. Expected a comma-separated list of prebuild, export, ios, android, or the single value auto.
+```
+
+Native builds are slow, and macOS minutes cost more. A common split is `prebuild,export` on pull requests and `auto` on a schedule:
+
+```yaml
+build: ${{ github.event_name == 'pull_request' && 'prebuild,export' || 'auto' }}
+```
 
 `android` needs a JDK. Add [`actions/setup-java`](https://github.com/actions/setup-java) before this action rather than relying on whatever the runner image ships.
 
@@ -218,7 +234,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - name: 🏗 Setup repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 📦 Install dependencies
         run: yarn install

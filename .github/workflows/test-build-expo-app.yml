@@ -1,0 +1,97 @@
+# Exercises the composite actions themselves. `review.yml` only lints, tests and
+# builds the TypeScript, so without this the shell logic in build-expo-app is
+# validated by nothing until a consumer hits it.
+name: test build-expo-app
+
+# GitHub Actions does not support YAML anchors, so the two path lists are duplicated.
+on:
+  push:
+    branches: [main]
+    paths:
+      - build-expo-app/**
+      - resolve-expo-versions/**
+      - build/resolve-expo-versions.js
+      - .github/workflows/test-build-expo-app.yml
+  pull_request:
+    paths:
+      - build-expo-app/**
+      - resolve-expo-versions/**
+      - build/resolve-expo-versions.js
+      - .github/workflows/test-build-expo-app.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The happy path, on the runner most consumers use. `build: auto` has to resolve
+  # to android here, so this also covers the default working on Linux.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Build Expo app
+        id: build
+        uses: ./build-expo-app
+        with:
+          expo-version: latest
+          build: prebuild,export
+          config-plugins: '["expo-font"]'
+
+      - name: Check the action resolved a concrete SDK version
+        env:
+          RESOLVED: ${{ steps.build.outputs.resolved-expo-version }}
+        run: |
+          echo "resolved-expo-version=$RESOLVED"
+          case "$RESOLVED" in
+            [0-9]*) ;;
+            *) echo "::error::expected a numeric SDK major, got '$RESOLVED'"; exit 1 ;;
+          esac
+
+      - name: Check the config plugin was registered
+        run: |
+          grep -q '"expo-font"' expo-test-app/app.json
+
+  # The failure paths. Each one used to be a silent skip or a late, opaque error,
+  # so assert the action still rejects them before doing any work.
+  rejects-bad-input:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: unknown build step
+            expo-version: latest
+            build: prebuild,exort
+          - name: ios on a linux runner
+            expo-version: latest
+            build: prebuild,export,ios
+          - name: SDK below the supported minimum
+            expo-version: '44'
+            build: prebuild
+    name: rejects ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Build Expo app
+        id: build
+        continue-on-error: true
+        uses: ./build-expo-app
+        with:
+          expo-version: ${{ matrix.expo-version }}
+          build: ${{ matrix.build }}
+
+      - name: Check the action failed
+        if: steps.build.outcome != 'failure'
+        run: |
+          echo "::error::expected build-expo-app to fail for '${{ matrix.name }}', got '${{ steps.build.outcome }}'"
+          exit 1
