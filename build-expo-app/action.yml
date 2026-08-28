@@ -108,6 +108,61 @@ runs:
       shell: bash
       working-directory: ${{ inputs.app-path }}
 
+    - name: Register config plugins
+      if: inputs.config-plugins != ''
+      env:
+        CONFIG_PLUGINS: ${{ inputs.config-plugins }}
+      run: |
+        echo "::group::Register config plugins"
+        node <<'NODE'
+        const fs = require('node:fs');
+
+        const shape = 'a JSON array, for example ["expo-router"] or [["my-plugin", { "mode": "dark" }]]';
+
+        let plugins;
+        try {
+          plugins = JSON.parse(process.env.CONFIG_PLUGINS);
+        } catch (error) {
+          console.error(`config-plugins is not valid JSON: ${error.message}`);
+          console.error(`Expected ${shape}`);
+          process.exit(1);
+        }
+
+        if (!Array.isArray(plugins)) {
+          console.error(`config-plugins must be ${shape}`);
+          process.exit(1);
+        }
+
+        if (!fs.existsSync('app.json')) {
+          console.error('app.json not found. config-plugins only supports static app.json config.');
+          console.error('For app.config.js or app.config.ts, edit the plugins list from setup-hook instead.');
+          process.exit(1);
+        }
+
+        // A plugin is either "name" or ["name", options]. Match on the name so a
+        // second entry for the same plugin replaces the first instead of duplicating it.
+        const nameOf = (plugin) => (Array.isArray(plugin) ? plugin[0] : plugin);
+
+        const config = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+        config.expo ??= {};
+        config.expo.plugins ??= [];
+
+        for (const plugin of plugins) {
+          const index = config.expo.plugins.findIndex((entry) => nameOf(entry) === nameOf(plugin));
+          if (index === -1) {
+            config.expo.plugins.push(plugin);
+          } else {
+            config.expo.plugins[index] = plugin;
+          }
+        }
+
+        fs.writeFileSync('app.json', JSON.stringify(config, null, 2) + '\n');
+        console.log(`app.json plugins: ${JSON.stringify(config.expo.plugins)}`);
+        NODE
+        echo "::endgroup::"
+      shell: bash
+      working-directory: ${{ inputs.app-path }}
+
     - name: Run setup hook
       if: inputs.setup-hook != ''
       run: |
@@ -211,6 +266,13 @@ inputs:
       workspace root or absolute. Existing files are overwritten. Use it to drop
       in an `App.tsx` that exercises the library, so `expo export` fails when the
       JS entry point breaks. Runs after `local-package` and before `setup-hook`.
+    required: false
+  config-plugins:
+    description: >-
+      Config plugins to add to `expo.plugins` in `app.json`, as a JSON array.
+      An entry is either a plugin name, or a `[name, options]` pair when the
+      plugin takes parameters. An entry replaces an existing one with the same
+      name. Runs after `copy-files` and before `setup-hook`.
     required: false
   setup-hook:
     description: Script to run after app is created/updated (install package, modify App.tsx, app.json, etc)
