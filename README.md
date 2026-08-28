@@ -27,6 +27,38 @@ A composite GitHub Action for smoke-testing library compatibility with different
 
 A GitHub Action that resolves Expo SDK version specifiers such as `latest` and `latest-1` into concrete versions, for use with `fromJSON()` in a matrix strategy.
 
+## Reusable workflows
+
+### [`expo/actions/.github/workflows/expo-compat.yml`](./.github/workflows/expo-compat.yml)
+
+A ready-made compatibility workflow for Expo libraries. It packs the library once, then fans out over every SDK version and runner, creating a blank app and installing the tarball the way a new user would.
+
+Use it instead of wiring up `resolve-expo-versions` and `build-expo-app` yourself:
+
+```yaml
+name: expo compatibility
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 4 1 * *' # monthly
+
+jobs:
+  compat:
+    uses: expo/actions/.github/workflows/expo-compat.yml@main
+    with:
+      expo-versions: latest,latest-1
+      config-plugins: '["my-library"]'
+```
+
+That covers two SDK versions on two runners. macOS builds iOS and everything else builds Android, so a two-runner matrix covers both platforms.
+
+Pull requests stop at `expo export`. Native builds run on every other trigger, because they are slow and macOS minutes are expensive. Pass `build` to override.
+
+This workflow always builds a blank app and installs the packed library into it, which is what a new user gets. To test an app that already exists in your repository, such as an example app you bump to each new SDK, call [`build-expo-app`](./build-expo-app#readme) directly with `app-path`.
+
+The library's package manager is detected from its lockfile, so most repositories need no `install-command`. See the [input descriptions](./.github/workflows/expo-compat.yml) for the rest — `package-path`, `build-command`, `copy-files`, `setup-hook`, `app-template`, `runners`, `java-version` and `upload-app`.
+
 ## Contributing
 
 All GitHub Actions in this repository are open-source and contributions are welcome.

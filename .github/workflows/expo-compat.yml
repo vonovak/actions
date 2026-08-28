@@ -1,0 +1,236 @@
+# A ready-made compatibility workflow for Expo libraries.
+#
+# Call it instead of wiring up resolve-expo-versions and build-expo-app yourself:
+#
+#   name: expo compatibility
+#   on:
+#     pull_request:
+#     schedule:
+#       - cron: '0 4 1 * *'
+#   jobs:
+#     compat:
+#       uses: expo/actions/.github/workflows/expo-compat.yml@main
+#       with:
+#         expo-versions: latest,latest-1
+#         config-plugins: '["my-library"]'
+#
+# It packs the library once, then fans out over every SDK version and runner,
+# creating a blank app and installing the tarball the way a new user would.
+# macOS runners build iOS and everything else builds Android, so a two-runner
+# matrix covers both platforms.
+#
+# Pull requests stop at `expo export`. Native builds run on every other trigger,
+# because they are slow and macOS minutes are expensive. Override with `build`.
+
+name: expo compatibility
+
+on:
+  workflow_call:
+    inputs:
+      expo-versions:
+        description: 'Comma-separated SDK specifiers: latest, latest-N, next, canary, or a major such as 53'
+        type: string
+        default: latest
+      runners:
+        description: JSON array of runners to fan out over
+        type: string
+        default: '["ubuntu-latest", "macos-latest"]'
+      build:
+        description: >-
+          Steps to run, passed straight to build-expo-app. Defaults to
+          `prebuild,export` on a pull request and `auto` on every other trigger.
+        type: string
+        default: ''
+      package-path:
+        description: Path to the library to pack, relative to the repository root
+        type: string
+        default: .
+      install-command:
+        description: >-
+          Command that installs the library's dependencies. Detected from the
+          lockfile when empty.
+        type: string
+        default: ''
+      build-command:
+        description: >-
+          Command that builds the library before packing. Skipped when empty, in
+          which case `npm pack` runs the `prepare` script instead.
+        type: string
+        default: ''
+      app-path:
+        description: Directory the test app is created in
+        type: string
+        default: expo-test-app
+      app-template:
+        description: Template used for the test app
+        type: string
+        default: expo-template-blank-typescript
+      copy-files:
+        description: >-
+          File or directory copied into the app root, relative to the repository
+          root. Use it for an App.tsx that imports the library, so `expo export`
+          fails when the JS entry point breaks.
+        type: string
+        default: ''
+      config-plugins:
+        description: Config plugins to register in the app's app.json, as a JSON array
+        type: string
+        default: ''
+      setup-hook:
+        description: >-
+          Script run in the app directory before the build. The repository is
+          checked out at `$GITHUB_WORKSPACE/library`.
+        type: string
+        default: ''
+      node-version:
+        description: Node version used for every job
+        type: string
+        default: lts/*
+      java-version:
+        description: JDK version installed on non-macOS runners, for the Android build
+        type: string
+        default: '17'
+      upload-app:
+        description: Upload each generated app as an artifact, including on failure
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  TARBALL: library.tgz
+  TARBALL_ARTIFACT: expo-compat-library-tarball
+
+jobs:
+  # Resolve the SDK matrix and pack the library once. Packing here rather than in
+  # every matrix job installs the library's dev dependencies a single time, and
+  # guarantees each job installs byte-identical bytes.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.resolve.outputs.versions }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Resolve Expo SDK versions
+        id: resolve
+        uses: $/resolve-expo-versions
+        with:
+          expo-version: ${{ inputs.expo-versions }}
+
+      - name: Install the library's dependencies
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        working-directory: ${{ inputs.package-path }}
+        run: |
+          if [ -z "$INSTALL_COMMAND" ]; then
+            # Pick the package manager the repository already uses, so the common
+            # case needs no input at all.
+            if [ -f yarn.lock ]; then
+              corepack enable
+              INSTALL_COMMAND="yarn install --immutable"
+            elif [ -f pnpm-lock.yaml ]; then
+              corepack enable
+              INSTALL_COMMAND="pnpm install --frozen-lockfile"
+            elif [ -f bun.lock ] || [ -f bun.lockb ]; then
+              INSTALL_COMMAND="bun install --frozen-lockfile"
+            elif [ -f package-lock.json ]; then
+              INSTALL_COMMAND="npm ci"
+            else
+              INSTALL_COMMAND="npm install"
+            fi
+            echo "Detected install command: $INSTALL_COMMAND"
+          fi
+
+          eval "$INSTALL_COMMAND"
+
+      - name: Build the library
+        if: inputs.build-command != ''
+        working-directory: ${{ inputs.package-path }}
+        run: ${{ inputs.build-command }}
+
+      - name: Pack the library
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        working-directory: ${{ inputs.package-path }}
+        run: |
+          # Pack with npm, not yarn. `yarn pack` also applies .gitignore, which
+          # commonly holds the build output that `files` deliberately includes.
+          #
+          # `npm pack` runs the `prepare` script, which is how libraries without a
+          # build-command produce their output. Skip it when build-command already
+          # did the work, so the build does not run twice.
+          PACK_ARGS=""
+          if [ -n "$BUILD_COMMAND" ]; then
+            PACK_ARGS="--ignore-scripts"
+          fi
+
+          mkdir -p "$RUNNER_TEMP/pack" # npm pack does not create the destination
+          npm pack $PACK_ARGS --pack-destination "$RUNNER_TEMP/pack"
+
+          COUNT=$(find "$RUNNER_TEMP/pack" -maxdepth 1 -name '*.tgz' | wc -l)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "::error::expected npm pack to produce exactly one tarball, got $COUNT"
+            exit 1
+          fi
+
+          mv "$RUNNER_TEMP"/pack/*.tgz "$RUNNER_TEMP/$TARBALL"
+          tar tzf "$RUNNER_TEMP/$TARBALL" | head -50
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.TARBALL_ARTIFACT }}
+          path: ${{ runner.temp }}/${{ env.TARBALL }}
+          retention-days: 1
+
+  test:
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        expo-version: ${{ fromJSON(needs.prepare.outputs.versions) }}
+        runner: ${{ fromJSON(inputs.runners) }}
+    name: expo ${{ matrix.expo-version }} (${{ matrix.runner }})
+    steps:
+      # Into a subdirectory, so the generated app does not sit inside the
+      # library's own package.json and get treated as part of its workspace.
+      - name: Checkout the library
+        uses: actions/checkout@v6
+        with:
+          path: library
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup Java
+        if: runner.os != 'macOS'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Download the packed library
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ env.TARBALL_ARTIFACT }}
+          path: library-dist
+
+      - name: Build Expo app
+        uses: $/build-expo-app
+        with:
+          expo-version: ${{ matrix.expo-version }}
+          app-path: ${{ inputs.app-path }}
+          app-template: ${{ inputs.app-template }}
+          local-package: library-dist/${{ env.TARBALL }}
+          copy-files: ${{ inputs.copy-files != '' && format('library/{0}', inputs.copy-files) || '' }}
+          config-plugins: ${{ inputs.config-plugins }}
+          setup-hook: ${{ inputs.setup-hook }}
+          upload-app: ${{ inputs.upload-app }}
+          build: ${{ inputs.build != '' && inputs.build || (github.event_name == 'pull_request' && 'prebuild,export' || 'auto') }}
