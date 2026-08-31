@@ -100,7 +100,6 @@ permissions:
 
 env:
   TARBALL: library.tgz
-  TARBALL_ARTIFACT: expo-compat-library-tarball
 
 jobs:
   # Resolve the SDK matrix and pack the library once. Packing here rather than in
@@ -110,6 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       versions: ${{ steps.resolve.outputs.versions }}
+      tarball-artifact: ${{ steps.artifact-name.outputs.name }}
     steps:
       - uses: actions/checkout@v6
 
@@ -126,11 +126,23 @@ jobs:
       - name: Install the library's dependencies
         env:
           INSTALL_COMMAND: ${{ inputs.install-command }}
-        working-directory: ${{ inputs.package-path }}
+          PACKAGE_PATH: ${{ inputs.package-path }}
         run: |
+          cd "$PACKAGE_PATH"
+
           if [ -z "$INSTALL_COMMAND" ]; then
             # Pick the package manager the repository already uses, so the common
-            # case needs no input at all.
+            # case needs no input at all. In a monorepo the lockfile sits at the
+            # repository root, not next to the package, so detect and install from
+            # the root when the package directory has no lockfile of its own.
+            has_lockfile() {
+              [ -f yarn.lock ] || [ -f pnpm-lock.yaml ] || [ -f bun.lock ] ||
+                [ -f bun.lockb ] || [ -f package-lock.json ]
+            }
+            if ! has_lockfile && (cd "$GITHUB_WORKSPACE" && has_lockfile); then
+              cd "$GITHUB_WORKSPACE"
+            fi
+
             if [ -f yarn.lock ]; then
               corepack enable
               INSTALL_COMMAND="yarn install --immutable"
@@ -144,15 +156,17 @@ jobs:
             else
               INSTALL_COMMAND="npm install"
             fi
-            echo "Detected install command: $INSTALL_COMMAND"
+            echo "Detected install command: $INSTALL_COMMAND (in $PWD)"
           fi
 
           eval "$INSTALL_COMMAND"
 
       - name: Build the library
         if: inputs.build-command != ''
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
         working-directory: ${{ inputs.package-path }}
-        run: ${{ inputs.build-command }}
+        run: eval "$BUILD_COMMAND"
 
       - name: Pack the library
         env:
@@ -182,9 +196,24 @@ jobs:
           mv "$RUNNER_TEMP"/pack/*.tgz "$RUNNER_TEMP/$TARBALL"
           tar tzf "$RUNNER_TEMP/$TARBALL" | head -50
 
+      - name: Name the tarball artifact
+        id: artifact-name
+        env:
+          PACKAGE_PATH: ${{ inputs.package-path }}
+        run: |
+          # A repository can call this workflow twice in one run (two packages),
+          # and upload-artifact rejects duplicate names. Suffix with package-path,
+          # sanitized because artifact names cannot contain slashes.
+          if [ "$PACKAGE_PATH" = . ]; then
+            SUFFIX=root
+          else
+            SUFFIX=$(printf '%s' "$PACKAGE_PATH" | tr -c 'A-Za-z0-9._-' '-')
+          fi
+          echo "name=expo-compat-library-tarball-$SUFFIX" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v5
         with:
-          name: ${{ env.TARBALL_ARTIFACT }}
+          name: ${{ steps.artifact-name.outputs.name }}
           path: ${{ runner.temp }}/${{ env.TARBALL }}
           retention-days: 1
 
@@ -219,7 +248,7 @@ jobs:
       - name: Download the packed library
         uses: actions/download-artifact@v5
         with:
-          name: ${{ env.TARBALL_ARTIFACT }}
+          name: ${{ needs.prepare.outputs.tarball-artifact }}
           path: library-dist
 
       - name: Build Expo app

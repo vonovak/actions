@@ -128,7 +128,7 @@ runs:
           # npm pack honours the `files` field and runs the `prepare` script.
           # Output goes to stderr so lifecycle noise cannot be mistaken for the path.
           (cd "$SOURCE" && npm pack --pack-destination "$PACK_DIR" >&2)
-          TARBALL=$(find "$PACK_DIR" -name '*.tgz' -maxdepth 1 | head -n1)
+          TARBALL=$(find "$PACK_DIR" -maxdepth 1 -name '*.tgz' -print -quit)
           if [ -z "$TARBALL" ]; then
             echo "npm pack produced no tarball in $SOURCE" >&2
             exit 1
@@ -309,7 +309,7 @@ runs:
 
     - name: Upload app
       if: always() && inputs.upload-app == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: ${{ format('expo-app-{0}-{1}-sdk{2}', runner.os, steps.setup-app.outputs.app-name, steps.resolve-version.outputs.resolved-version) }}
         path: |
