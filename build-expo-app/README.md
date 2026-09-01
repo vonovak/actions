@@ -37,6 +37,9 @@
 
 `build-expo-app` is a composite GitHub Action for checking that a library still works on a given Expo SDK version. It sets up an Expo app, bundles the JS, and optionally runs a real native build.
 
+> [!TIP]
+> For the common case — test a library against several SDK versions on both platforms — call the [`expo-compat.yml` reusable workflow](../README.md#expoactionsgithubworkflowsexpo-compatyml) instead. It wires this action into a pack-once, fan-out matrix for you. Use this action directly for other shapes, such as building an existing example app.
+
 This action automatically handles:
 
 - Creating a new Expo app from a template, or bumping an existing one to the target SDK

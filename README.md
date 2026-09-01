@@ -55,7 +55,9 @@ That covers two SDK versions on two runners. macOS builds iOS and everything els
 
 Pull requests stop at `expo export`. Native builds run on every other trigger, because they are slow and macOS minutes are expensive. Pass `build` to override.
 
-This workflow always builds a blank app and installs the packed library into it, which is what a new user gets. To test an app that already exists in your repository, such as an example app you bump to each new SDK, call [`build-expo-app`](./build-expo-app#readme) directly with `app-path`.
+This workflow always builds a blank app and installs the packed library into it, which is what a new user gets. To test an app that already exists in your repository, such as an example app you bump to each new SDK, call [`build-expo-app`](./build-expo-app#readme) directly with `app-path`. The workflow exposes the resolved SDK versions as a `versions` output, so a follow-up job can reuse the same matrix through `needs.<job>.outputs.versions`.
+
+The workflow references sibling actions with the `$/` syntax, which needs GitHub Actions runner 2.336.0 or newer. GitHub-hosted runners have it; GitHub Enterprise Server does not.
 
 The library's package manager is detected from its lockfile, so most repositories need no `install-command`. See the [input descriptions](./.github/workflows/expo-compat.yml) for the rest — `package-path`, `build-command`, `copy-files`, `setup-hook`, `app-template`, `runners`, `java-version` and `upload-app`.
 

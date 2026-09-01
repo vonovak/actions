@@ -21,11 +21,19 @@
 #
 # Pull requests stop at `expo export`. Native builds run on every other trigger,
 # because they are slow and macOS minutes are expensive. Override with `build`.
+#
+# The workflow references sibling actions with the `$/` syntax, which needs
+# GitHub Actions runner 2.336.0 or newer. GitHub-hosted runners have it; GitHub
+# Enterprise Server does not.
 
 name: expo compatibility
 
 on:
   workflow_call:
+    outputs:
+      versions:
+        description: JSON array of the resolved SDK versions, for use with fromJSON() in a follow-up matrix
+        value: ${{ jobs.prepare.outputs.versions }}
     inputs:
       expo-versions:
         description: 'Comma-separated SDK specifiers: latest, latest-N, next, canary, or a major such as 53'
@@ -48,7 +56,8 @@ on:
       install-command:
         description: >-
           Command that installs the library's dependencies. Detected from the
-          lockfile when empty.
+          lockfile when empty, looking in `package-path` first and the
+          repository root second, and running where the lockfile is.
         type: string
         default: ''
       build-command:
